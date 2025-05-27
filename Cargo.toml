@@ -1,0 +1,7 @@
+[package]
+name = "ss"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ipnetwork = "0.21.1" # 请检查最新的版本号

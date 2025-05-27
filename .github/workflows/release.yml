@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [x86_64, aarch64]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.arch }}-${{ matrix.os == 'windows-latest' && 'pc-windows-msvc' || matrix.os == 'macos-latest' && 'apple-darwin' || 'unknown-linux-gnu' }}
+
+    - name: Install cross-compilation dependencies
+      if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
+
+    - name: Build
+      env:
+        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+        CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+      run: cargo build --release --target ${{ matrix.arch }}-${{ matrix.os == 'windows-latest' && 'pc-windows-msvc' || matrix.os == 'macos-latest' && 'apple-darwin' || 'unknown-linux-gnu' }}
+
+    - name: Prepare artifacts
+      shell: bash
+      run: |
+        mkdir -p artifacts
+        if [ "${{ matrix.os }}" == "windows-latest" ]; then
+          cp target/${{ matrix.arch }}-pc-windows-msvc/release/ccmk.exe artifacts/
+        else
+          cp target/${{ matrix.arch }}-${{ matrix.os == 'macos-latest' && 'apple-darwin' || 'unknown-linux-gnu' }}/release/ccmk artifacts/
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4.6.2
+      with:
+        name: ccmk-${{ matrix.os }}-${{ matrix.arch }}
+        path: artifacts/
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4.3.0
+      with:
+        path: artifacts
+
+    - name: Prepare release assets
+      shell: bash
+      run: |
+        mkdir -p release-assets
+        find artifacts -type f -name "ccmk*" | while read file; do
+          platform=$(echo $file | cut -d/ -f2 | sed 's/ccmk-//g')
+          if [[ $file == *".exe" ]]; then
+            cp "$file" "release-assets/ccmk-$platform.exe"
+          else
+            cp "$file" "release-assets/ccmk-$platform"
+          fi
+        done
+
+    - name: Create release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-assets/*
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        body: |
+          CCMK Release ${{ github.ref_name }}
+          
+          Automated release for CCMK project.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
