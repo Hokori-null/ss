@@ -42,15 +42,15 @@ jobs:
       run: |
         mkdir -p artifacts
         if [ "${{ matrix.os }}" == "windows-latest" ]; then
-          cp target/${{ matrix.arch }}-pc-windows-msvc/release/ccmk.exe artifacts/
+          cp target/${{ matrix.arch }}-pc-windows-msvc/release/ss.exe artifacts/
         else
-          cp target/${{ matrix.arch }}-${{ matrix.os == 'macos-latest' && 'apple-darwin' || 'unknown-linux-gnu' }}/release/ccmk artifacts/
+          cp target/${{ matrix.arch }}-${{ matrix.os == 'macos-latest' && 'apple-darwin' || 'unknown-linux-gnu' }}/release/ss artifacts/
         fi
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4.6.2
       with:
-        name: ccmk-${{ matrix.os }}-${{ matrix.arch }}
+        name: ss-${{ matrix.os }}-${{ matrix.arch }}
         path: artifacts/
 
   release:
@@ -69,12 +69,12 @@ jobs:
       shell: bash
       run: |
         mkdir -p release-assets
-        find artifacts -type f -name "ccmk*" | while read file; do
-          platform=$(echo $file | cut -d/ -f2 | sed 's/ccmk-//g')
+        find artifacts -type f -name "ss*" | while read file; do
+          platform=$(echo $file | cut -d/ -f2 | sed 's/ss-//g')
           if [[ $file == *".exe" ]]; then
-            cp "$file" "release-assets/ccmk-$platform.exe"
+            cp "$file" "release-assets/ss-$platform.exe"
           else
-            cp "$file" "release-assets/ccmk-$platform"
+            cp "$file" "release-assets/ss-$platform"
           fi
         done
 
@@ -85,8 +85,8 @@ jobs:
         tag_name: ${{ github.ref_name }}
         name: Release ${{ github.ref_name }}
         body: |
-          CCMK Release ${{ github.ref_name }}
+          ss Release ${{ github.ref_name }}
           
-          Automated release for CCMK project.
+          Automated release for ss project.
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
