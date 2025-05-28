@@ -47,48 +47,87 @@ fn main() {
         target_cidr, target_port, NUM_THREADS, TIMEOUT_MS
     );
 
-    let network: Ipv4Network = match Ipv4Network::from_str(target_cidr) {
-        Ok(net) => net,
-        Err(e) => {
-            eprintln!("哎呀，网段 '{}' 格式好像不对哦: {}", target_cidr, e);
-            return;
-        }
-    };
-
     let (tx, rx) = channel::<Ipv4Addr>();
     let timeout = Duration::from_millis(TIMEOUT_MS);
 
     let mut threads = vec![];
     let mut ips_to_scan = vec![];
 
-    // 收集所有需要扫描的 IP 地址 (排除网络地址和广播地址)
-    for ip in network.iter().skip(1) { // network.iter() 包含网络地址和广播地址
-        if ip == network.broadcast() {
-            continue;
+    // 尝试将输入解析为 CIDR 网段
+    match Ipv4Network::from_str(target_cidr) {
+        Ok(network) => {
+            println!(
+                "主人，开始扫描网段 {} 的端口 {}，使用 {} 个线程，超时时间 {}毫秒...",
+                target_cidr, target_port, NUM_THREADS, TIMEOUT_MS
+            );
+            // 收集所有需要扫描的 IP 地址 (排除网络地址和广播地址)
+            for ip in network.iter().skip(1) { // network.iter() 包含网络地址和广播地址
+                if ip == network.broadcast() {
+                    continue;
+                }
+                ips_to_scan.push(ip);
+            }
+            
+            if ips_to_scan.is_empty() && network.prefix() < 31 { // 对于 /31 和 /32 特殊处理
+                // 对于 /31 和 /32，network.iter() 的行为可能需要特别注意
+                // /32 的 iter() 只返回一个IP，就是它本身
+                // /31 的 iter() 返回两个IP
+                if network.prefix() == 32 {
+                    ips_to_scan.push(network.network());
+                } else if network.prefix() == 31 {
+                     ips_to_scan.push(network.network());
+                     ips_to_scan.push(network.broadcast()); // 在/31中，这两个都是可用地址
+                } else {
+                    println!("这个网段太小啦，没有可用的主机 IP 地址可以扫描哦。");
+                    return;
+                }
+            }
         }
-        ips_to_scan.push(ip);
+        Err(_) => {
+            // 尝试将输入解析为单个 IPv4 地址
+            if let Ok(single_ip) = Ipv4Addr::from_str(target_cidr) {
+                println!(
+                    "主人，开始扫描单个 IP {} 的端口 {}，使用 {} 个线程，超时时间 {}毫秒...",
+                    single_ip, target_port, NUM_THREADS, TIMEOUT_MS
+                );
+                ips_to_scan.push(single_ip);
+            } else {
+                // 尝试将输入解析为域名
+                use std::net::ToSocketAddrs;
+                let address_str = format!("{}:{}", target_cidr, target_port);
+                match address_str.to_socket_addrs() {
+                    Ok(mut addrs) => {
+                        if let Some(socket_addr) = addrs.find(|sa| sa.is_ipv4()) {
+                            if let IpAddr::V4(ipv4_addr) = socket_addr.ip() {
+                                println!(
+                                    "主人，域名 {} 解析为 IP {}，开始扫描端口 {}，使用 {} 个线程，超时时间 {}毫秒...",
+                                    target_cidr, ipv4_addr, target_port, NUM_THREADS, TIMEOUT_MS
+                                );
+                                ips_to_scan.push(ipv4_addr);
+                            } else {
+                                eprintln!("哎呀，域名 {} 解析成功但没有找到 IPv4 地址。", target_cidr);
+                                return;
+                            }
+                        } else {
+                            eprintln!("哎呀，无法将 '{}' 解析为有效的 IPv4 地址或域名，或者域名没有 IPv4 记录。", target_cidr);
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("哎呀，输入 '{}' 格式好像不对哦，既不是有效的 CIDR 网段，也不是有效的 IPv4 地址或可解析的域名: {}", target_cidr, e);
+                        return;
+                    }
+                }
+            }
+        }
     }
-    
-    if ips_to_scan.is_empty() && network.prefix() < 31 { // 对于 /31 和 /32 特殊处理
-        println!("这个网段太小啦，没有可用的主机 IP 地址可以扫描哦。");
-        return;
-    } else if network.prefix() == 31 { // /31 网络，有两个可用IP
-        ips_to_scan.clear(); // 清空之前可能错误添加的
-        ips_to_scan.push(network.network());
-        ips_to_scan.push(network.broadcast()); // 在/31中，这两个都是可用地址
-    } else if network.prefix() == 32 { // /32 网络，只有一个IP
-        ips_to_scan.clear();
-        ips_to_scan.push(network.network());
-    }
-
 
     let total_ips = ips_to_scan.len();
     if total_ips == 0 {
-        println!("这个网段 {} 没有可扫描的主机 IP 哦。", target_cidr);
+        println!("没有找到可扫描的 IP 地址哦 (输入: {})。", target_cidr);
         return;
     }
     println!("总共需要扫描 {} 个 IP 地址...", total_ips);
-
 
     let mut ip_idx = 0;
     for _ in 0..NUM_THREADS {
